@@ -1,0 +1,9 @@
+Dear Professor {{ last_name }},
+
+I hope you are well. I am following up on my earlier email regarding possible Master by Research or MPhil opportunities in {{ domain }} under your supervision.
+
+I understand you may be busy, and I would be grateful for any guidance when convenient. I have attached my CV again for reference.
+
+Kind regards,
+[YOUR NAME]
+

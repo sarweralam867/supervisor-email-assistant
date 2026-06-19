@@ -1,0 +1,25 @@
+# Secrets and local Python environment
+.env
+.env.*
+!.env.example
+.venv/
+
+# All user-specific inputs stay local. Keep only the empty folder marker.
+private_data/*
+!private_data/.gitkeep
+
+# Generated output
+logs/*.csv
+logs/drafts/*.eml
+
+# Local development notes
+PROJECT_PLAN.md
+
+# Python/editor/OS artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

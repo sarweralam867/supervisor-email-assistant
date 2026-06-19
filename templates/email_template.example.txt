@@ -1,0 +1,18 @@
+Dear Professor {{ last_name }},
+
+I hope you are doing well.
+
+My name is [YOUR NAME], and I am writing to ask whether you are currently accepting Master by Research or MPhil students in {{ domain }}.
+
+[ADD TWO OR THREE SHORT SENTENCES ABOUT YOUR EDUCATION, RESEARCH EXPERIENCE, AND WHY THIS PROFESSOR IS A GOOD MATCH.]
+
+I have attached my CV for your review. I would be grateful for any guidance about suitable research opportunities and funding.
+
+Thank you for your time and consideration.
+
+Kind regards,
+[YOUR NAME]
+[YOUR CURRENT ROLE]
+[YOUR EMAIL]
+[YOUR LINKEDIN OR WEBSITE]
+
