@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools==75.8.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "supervisor-email-assistant"
+version = "0.2.0"
+description = "Safe, review-first research supervisor outreach email tooling"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "Jinja2==3.1.6",
+  "pandas==2.3.3",
+  "python-dotenv==1.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.5",
+  "ruff==0.11.2",
+]
+
+[tool.setuptools]
+py-modules = ["config", "email_builder", "gmail_sender", "load_professors", "main"]
+package-dir = { "" = "src" }
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
