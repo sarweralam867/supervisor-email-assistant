@@ -17,6 +17,7 @@ TITLE_RE = re.compile(
 
 
 def extract_last_name(full_name: str) -> str:
+    """Extract a surname after removing common academic titles."""
     cleaned = full_name.strip()
     previous = None
     while cleaned and cleaned != previous:
@@ -29,12 +30,17 @@ def extract_last_name(full_name: str) -> str:
 
 
 def render_body(template_path: Path, professor: Professor) -> str:
+    """Render a strict Jinja email template for a professor."""
     if not template_path.is_file():
         raise FileNotFoundError(f"Email template not found: {template_path}")
     template = Environment(undefined=StrictUndefined, autoescape=False).from_string(
         template_path.read_text(encoding="utf-8")
     )
-    return template.render(last_name=extract_last_name(professor.name), domain=professor.domain).strip() + "\n"
+    rendered = template.render(
+        last_name=extract_last_name(professor.name),
+        domain=professor.domain,
+    )
+    return rendered.strip() + "\n"
 
 
 def build_message(
@@ -43,6 +49,7 @@ def build_message(
     template_path: Path,
     cv_path: Path,
 ) -> EmailMessage:
+    """Build a plain-text MIME message with a PDF CV attachment."""
     if not cv_path.is_file():
         raise FileNotFoundError(f"CV not found: {cv_path}")
 
@@ -61,13 +68,14 @@ def build_message(
 
 
 def safe_draft_filename(professor: Professor) -> str:
+    """Create a portable draft filename from recipient identity."""
     base = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{professor.name}_{professor.email}").strip("_")
     return f"{base}.eml"
 
 
 def save_draft(message: EmailMessage, professor: Professor, drafts_dir: Path) -> Path:
+    """Save a MIME message as an ``.eml`` draft and return its path."""
     drafts_dir.mkdir(parents=True, exist_ok=True)
     path = drafts_dir / safe_draft_filename(professor)
     path.write_bytes(message.as_bytes())
     return path
-

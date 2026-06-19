@@ -14,10 +14,12 @@ logs/drafts/*.eml
 
 # Local development notes
 PROJECT_PLAN.md
+code notes.md
 
 # Python/editor/OS artifacts
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .idea/
 .vscode/
