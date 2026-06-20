@@ -57,7 +57,8 @@ def build_message(
 
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = sender
+    if sender:
+        message["From"] = sender
     message["To"] = professor.email
     message.set_content(render_body(template_path, professor))
     message.add_attachment(
@@ -78,6 +79,8 @@ def safe_draft_filename(professor: Professor) -> str:
 def save_draft(message: EmailMessage, professor: Professor, drafts_dir: Path) -> Path:
     """Save a MIME message as an ``.eml`` draft and return its path."""
     drafts_dir.mkdir(parents=True, exist_ok=True)
+    if "X-Unsent" not in message:
+        message["X-Unsent"] = "1"
     path = drafts_dir / safe_draft_filename(professor)
     path.write_bytes(message.as_bytes())
     return path

@@ -6,15 +6,22 @@ advanced SMTP mode and type `SEND`.
 
 ## Choose how you want to use it
 
-### Option 1: Easy drafts (recommended)
+### Option 1: Easy desktop drafts (recommended)
 
-- No email password or SMTP setup
-- One command creates every eligible draft
-- A private review page opens in your browser
-- Complete `.eml` files include your CV
+- No email password, API, OAuth, or SMTP setup
+- One command creates every eligible `.eml` draft
+- Every draft contains your CV attachment
+- The first draft opens in your default desktop email application
 - You review and send each message yourself
 
-### Option 2: Automatic sending (advanced)
+### Option 2: Gmail in Chrome or another browser
+
+- Opens a private review page with an **Open in Gmail** button for each email
+- Fills in the recipient, subject, and email body automatically
+- You must attach `private_data/cv.pdf` manually in Gmail
+- You review and send each message yourself
+
+### Option 3: Automatic SMTP sending (advanced)
 
 - Sends through your email provider's SMTP server
 - Requires a provider-specific password and configuration
@@ -110,7 +117,7 @@ Kind regards,
 Prospective Research Student in AI/ML and Medical Imaging
 ```
 
-## Make all drafts with one command
+## Start with one command
 
 Run this in the project PowerShell window:
 
@@ -118,21 +125,51 @@ Run this in the project PowerShell window:
 .\.venv\Scripts\python.exe make_drafts.py
 ```
 
+You will see this menu:
+
+```text
+1. Desktop app (recommended) - CV attached; use Thunderbird, Outlook, etc.
+2. Gmail in browser - opens your browser; attach the CV manually
+3. Automatic SMTP - sends only after you type SEND
+4. Exit
+```
+
+Type a number and press **Enter**.
+
+### Choice 1: Thunderbird, Outlook, or another desktop app
+
 The program will:
 
 1. Validate the professor list and skip unsafe or missing addresses.
-2. Skip addresses already drafted, sent, or opted out.
-3. Create complete `.eml` files with the CV attached in `logs/drafts`.
-4. Create `logs/drafts/review.html` and open it in your default browser.
-5. Send nothing.
+2. Remove old generated `.eml` files and the old review page.
+3. Rebuild every eligible unsent draft using the latest CSV, template, subject, and CV.
+4. Continue skipping sent and opted-out addresses.
+5. Create complete `.eml` files with the CV attached in `logs/drafts`.
+6. Open the drafts folder in File Explorer and the first fresh draft in your desktop email app.
+7. Send nothing.
 
-On the review page, **Open in Gmail** prefills the recipient, subject, and message. For browser security,
-Gmail cannot accept a local attachment through a link, so attach `private_data/cv.pdf` before sending.
-The `.eml` files already contain the CV and can be opened with a compatible desktop email application such
-as Outlook or Thunderbird.
+Run the same command whenever you change `professors.csv`, `email_template.txt`, `subject.txt`, or `cv.pdf`.
+You do not need to remove old log entries manually.
 
-Do not close your browser page until you finish reviewing. You can reopen it at any time by opening
-`logs/drafts/review.html`.
+The drafts folder opens in File Explorer, and the first `.eml` draft opens automatically in the desktop email
+application associated with `.eml` files.
+Every `.eml` contains the CV attachment. Review it, then send it from Outlook, Thunderbird, or another
+compatible desktop email application. The remaining drafts stay in `logs/drafts` and can be opened in order.
+
+For the easiest Gmail desktop experience, install [Thunderbird](https://www.thunderbird.net/), add your Gmail
+account, and set Thunderbird as the default app for `.eml` files.
+
+### Choice 2: Gmail in Chrome or another browser
+
+The program creates the same fresh drafts and opens a private page in your default browser. Click **Open in
+Gmail** beside an email. Gmail receives the recipient, subject, and body. Then click Gmail's attachment button,
+select `private_data/cv.pdf`, review the email, and click **Send**.
+
+Browsers cannot attach a local file automatically without additional API permissions, so the CV attachment is
+manual in this choice. The generated `.eml` files still contain the CV.
+
+The private `logs/drafts/review.html` file contains a read-only overview. Do not click `.eml` files from inside
+Chrome; open them by double-clicking in the File Explorer window so Windows sends them to your email app.
 
 ## Useful safe commands
 
@@ -154,7 +191,7 @@ Record an opt-out address:
 .\.venv\Scripts\python.exe src\main.py --opt-out person@example.edu
 ```
 
-## Automatic sending (advanced and optional)
+## Choice 3: Automatic SMTP sending (advanced and optional)
 
 Choose this mode instead of Easy drafts for recipients you want the program to send automatically.
 Addresses already recorded as drafted or sent are skipped to prevent duplicates.
@@ -174,13 +211,13 @@ Addresses already recorded as drafted or sent are skipped to prevent duplicates.
    .\.venv\Scripts\python.exe src\main.py --preview --limit 1
    ```
 
-4. Send one real message as a test:
+4. Run the same beginner command:
 
    ```powershell
-   .\.venv\Scripts\python.exe src\main.py --mode send --limit 1
+   .\.venv\Scripts\python.exe make_drafts.py
    ```
 
-5. Type `SEND` exactly when prompted. Successful output says `SENT`.
+5. Choose **3**, then type `SEND` exactly when prompted. Successful output says `SENT`.
 
 After a successful test, use `--limit 10` for the daily maximum. Keep PowerShell open while the program waits
 between messages. Authentication failures are not retried; transient network failures use bounded backoff.
@@ -204,6 +241,8 @@ Before pushing changes, `git status` must not show `.env`, `private_data` conten
 - **CV not found:** confirm the filename is exactly `private_data/cv.pdf`.
 - **CSV error:** save it as UTF-8 CSV and keep the sample headers unchanged.
 - **Template error:** keep `{{ last_name }}` and `{{ domain }}` unchanged.
+- **A blank `.eml` opens in Chrome:** close that tab and double-click the file in `logs/drafts` using File
+  Explorer. Set Outlook or Thunderbird as the default `.eml` application if Windows asks.
 - **Gmail login rejected:** revoke exposed credentials and create a fresh Gmail App Password for the same account.
 
 ## Development

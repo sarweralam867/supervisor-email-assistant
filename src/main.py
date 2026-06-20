@@ -20,7 +20,7 @@ from config import Settings, load_settings
 from email_builder import build_message, render_body, save_draft
 from gmail_sender import SMTPSender
 from load_professors import Professor, email_skip_reason, load_professors, normalize_email
-from review_page import open_review_page, save_review_page
+from review_page import open_drafts_folder, open_email_draft, open_review_page, save_review_page
 
 LOGGER = logging.getLogger("supervisor_email_assistant")
 LOG_FIELDS = [
@@ -61,6 +61,16 @@ def parse_args(settings: Settings, argv: Sequence[str] | None = None) -> argpars
         "--open-drafts",
         action="store_true",
         help="Open the private local review page after creating drafts.",
+    )
+    parser.add_argument(
+        "--refresh-drafts",
+        action="store_true",
+        help="Rebuild local drafts from current inputs; sent and opted-out addresses remain skipped.",
+    )
+    parser.add_argument(
+        "--browser-review",
+        action="store_true",
+        help="Open Gmail compose links in a browser; attach the CV manually.",
     )
     parser.add_argument("--opt-out", metavar="EMAIL", help="Record an address that must never be contacted.")
     return parser.parse_args(argv)
@@ -116,6 +126,28 @@ def completed_addresses(rows: list[dict[str, str]]) -> set[str]:
         for row in rows
         if row.get("status", "").lower() in COMPLETED_STATUSES
     }
+
+
+def sent_addresses(rows: list[dict[str, str]]) -> set[str]:
+    """Return normalized addresses that have already been sent."""
+    return {
+        normalize_email(row.get("email", ""))
+        for row in rows
+        if row.get("status", "").lower() == "sent"
+    }
+
+
+def clear_generated_drafts(drafts_dir: Path) -> int:
+    """Delete only generated ``.eml`` files and the local review index."""
+    if not drafts_dir.is_dir():
+        return 0
+    paths = list(drafts_dir.glob("*.eml"))
+    review_path = drafts_dir / "review.html"
+    if review_path.is_file():
+        paths.append(review_path)
+    for path in paths:
+        path.unlink()
+    return len(paths)
 
 
 def blocked_addresses(rows: list[dict[str, str]]) -> set[str]:
@@ -231,6 +263,9 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
 
     if args.preview:
         args.mode = "preview"
+    refresh_drafts = getattr(args, "refresh_drafts", False)
+    if refresh_drafts and args.mode != "draft_only":
+        raise ValueError("--refresh-drafts can only be used with draft_only mode.")
     rows = read_log(settings.log_path)
     limit = effective_limit(args, settings, rows)
     if args.mode == "send":
@@ -244,7 +279,7 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
         if not settings.sender_address or not settings.auth_password:
             raise ValueError("EMAIL_ADDRESS and SMTP_PASSWORD are required for send mode.")
 
-    processed = completed_addresses(rows)
+    processed = sent_addresses(rows) if refresh_drafts else completed_addresses(rows)
     opted_out = blocked_addresses(rows) | load_opt_outs(settings.opt_out_path)
     candidates: list[Professor] = []
     for professor, reason, raw in load_professors(settings.csv_path):
@@ -276,22 +311,33 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
             processed.add(normalized)
 
     candidates = candidates[:limit]
+    if refresh_drafts:
+        if not settings.template_path.is_file():
+            raise FileNotFoundError(f"Email template not found: {settings.template_path}")
+        if not settings.cv_path.is_file():
+            raise FileNotFoundError(f"CV not found: {settings.cv_path}")
+        removed = clear_generated_drafts(settings.drafts_dir)
+        LOGGER.info("Removed %d old generated draft file(s).", removed)
     if not candidates:
         LOGGER.info("No eligible emails to process.")
         existing_review = settings.drafts_dir / "review.html"
         if args.mode == "draft_only" and getattr(args, "open_drafts", False) and existing_review.is_file():
-            open_review_page(existing_review)
+            existing_drafts = sorted(settings.drafts_dir.glob("*.eml"))
+            open_drafts_folder(settings.drafts_dir)
+            if existing_drafts:
+                open_email_draft(existing_drafts[0])
         return 0
     if args.mode == "preview":
         preview_professors(candidates, settings.template_path, output)
         LOGGER.info("Previewed %d eligible email(s); no files created and nothing sent.", len(candidates))
         return 0
 
-    sender_address = settings.sender_address or "draft-review@example.invalid"
+    sender_address = settings.sender_address
     context: AbstractContextManager[SMTPSender | None]
     context = SMTPSender(settings) if args.mode == "send" else nullcontext()
     completed = 0
     draft_messages: list[EmailMessage] = []
+    draft_paths: list[Path] = []
     try:
         with context as smtp:
             for index, professor in enumerate(candidates):
@@ -306,6 +352,7 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
                     if args.mode == "draft_only":
                         path = save_draft(message, professor, settings.drafts_dir)
                         draft_messages.append(message)
+                        draft_paths.append(path)
                         status = "drafted"
                         LOGGER.info("DRAFT %s: %s", professor.email, path)
                     else:
@@ -338,12 +385,19 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
     if draft_messages:
         review_path = save_review_page(
             draft_messages,
+            draft_paths,
             settings.drafts_dir / "review.html",
             settings.cv_path,
+            browser_compose=getattr(args, "browser_review", False),
         )
         LOGGER.info("REVIEW PAGE: %s", review_path)
-        if getattr(args, "open_drafts", False) and not open_review_page(review_path):
-            LOGGER.warning("Could not open the browser automatically. Open this file: %s", review_path)
+        if getattr(args, "browser_review", False) and not open_review_page(review_path):
+            LOGGER.warning("Could not open the browser review page: %s", review_path)
+        if getattr(args, "open_drafts", False):
+            if not open_drafts_folder(settings.drafts_dir):
+                LOGGER.warning("Could not open the drafts folder automatically: %s", settings.drafts_dir)
+            if not open_email_draft(draft_paths[0]):
+                LOGGER.warning("Could not open the first draft automatically: %s", draft_paths[0])
 
     LOGGER.info("Completed %d of %d eligible email(s) in %s mode.", completed, len(candidates), args.mode)
     return 0 if completed == len(candidates) else 1

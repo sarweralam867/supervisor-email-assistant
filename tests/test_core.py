@@ -13,20 +13,24 @@ from pathlib import Path
 import pytest
 
 import draft_launcher
+import main as main_module
 from config import Settings, load_subject
 from email_builder import build_message, extract_last_name, render_body, save_draft
 from gmail_sender import SMTPSender
 from load_professors import Professor, email_skip_reason, load_professors
 from main import (
+    append_log,
     blocked_addresses,
+    clear_generated_drafts,
     completed_addresses,
     effective_limit,
     load_opt_outs,
     record_opt_out,
     run,
+    sent_addresses,
     sent_today,
 )
-from review_page import gmail_compose_url, open_review_page, save_review_page
+from review_page import open_drafts_folder, open_email_draft, open_review_page, save_review_page
 
 
 def make_settings(tmp_path: Path, **overrides: object) -> Settings:
@@ -155,6 +159,14 @@ def test_duplicate_detection_is_case_insensitive() -> None:
     assert completed_addresses(rows) == {"name@example.edu"}
 
 
+def test_sent_addresses_excludes_draft_only_state() -> None:
+    rows = [
+        {"email": "draft@example.edu", "status": "drafted"},
+        {"email": "sent@example.edu", "status": "sent"},
+    ]
+    assert sent_addresses(rows) == {"sent@example.edu"}
+
+
 def test_opt_out_state_and_registry_are_case_insensitive(tmp_path: Path) -> None:
     path = tmp_path / "opt_out.csv"
     assert record_opt_out(path, "Person@Example.edu") is True
@@ -211,6 +223,7 @@ def test_build_and_save_eml_with_pdf_attachment(tmp_path: Path) -> None:
 
     assert draft.is_file()
     assert message["To"] == professor.email
+    assert message["X-Unsent"] == "1"
     assert "Dear Professor Researcher" in message.get_body(preferencelist=("plain",)).get_content()
     attachments = list(message.iter_attachments())
     assert len(attachments) == 1
@@ -270,20 +283,39 @@ def test_review_page_escapes_content_and_opens_local_file(tmp_path: Path) -> Non
     message["To"] = "person@example.edu"
     message["Subject"] = "Research <discussion>"
     message.set_content("Hello <script>alert('no')</script>")
-    review_path = save_review_page([message], tmp_path / "review.html", tmp_path / "cv.pdf")
+    draft_path = tmp_path / "person.eml"
+    draft_path.write_bytes(message.as_bytes())
+    review_path = save_review_page(
+        [message],
+        [draft_path],
+        tmp_path / "review.html",
+        tmp_path / "cv.pdf",
+    )
     page = review_path.read_text(encoding="utf-8")
 
     assert "Hello &lt;script&gt;" in page
     assert "<script>alert" not in page
-    assert "Open in Gmail" in page
-    assert "person%40example.edu" in gmail_compose_url(message)
+    assert "Draft file:" in page
+    assert draft_path.name in page
+    assert "Open in Gmail" not in page
 
     opened: list[str] = []
     assert open_review_page(review_path, lambda url: opened.append(url) or True)
     assert opened == [review_path.resolve().as_uri()]
 
+    opened_drafts: list[Path] = []
+    assert open_email_draft(draft_path, opened_drafts.append)
+    assert opened_drafts == [draft_path.resolve()]
 
-def test_all_draft_mode_creates_every_draft_and_review_page(tmp_path: Path) -> None:
+    opened_folders: list[Path] = []
+    assert open_drafts_folder(tmp_path, opened_folders.append)
+    assert opened_folders == [tmp_path.resolve()]
+
+
+def test_all_draft_mode_creates_every_draft_and_opens_first(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     settings = make_settings(tmp_path, email_subject="Research enquiry")
     settings.csv_path.write_text(
         "Professor / Researcher,Email,University,Best-fit Domain\n"
@@ -293,6 +325,123 @@ def test_all_draft_mode_creates_every_draft_and_review_page(tmp_path: Path) -> N
     )
     settings.template_path.write_text("Dear Professor {{ last_name }}, {{ domain }}", encoding="utf-8")
     settings.cv_path.write_bytes(b"%PDF-1.4\n%%EOF")
+    opened_drafts: list[Path] = []
+    opened_folders: list[Path] = []
+    monkeypatch.setattr(
+        main_module,
+        "open_email_draft",
+        lambda path: opened_drafts.append(path) or True,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "open_drafts_folder",
+        lambda path: opened_folders.append(path) or True,
+    )
+
+    result = run(
+        settings,
+        Namespace(
+            mode="draft_only",
+            preview=False,
+            limit=None,
+            opt_out=None,
+            all=True,
+            open_drafts=True,
+        ),
+    )
+
+    assert result == 0
+    assert len(list(settings.drafts_dir.glob("*.eml"))) == 2
+    assert (settings.drafts_dir / "review.html").is_file()
+    assert len(opened_drafts) == 1
+    assert opened_drafts[0].suffix == ".eml"
+    assert opened_folders == [settings.drafts_dir]
+
+
+@pytest.mark.parametrize(
+    ("choice", "expected"),
+    [
+        ("1", ["--mode", "draft_only", "--all", "--refresh-drafts", "--open-drafts"]),
+        ("2", ["--mode", "draft_only", "--all", "--refresh-drafts", "--browser-review"]),
+        ("3", ["--mode", "send"]),
+    ],
+)
+def test_beginner_launcher_menu(
+    monkeypatch: pytest.MonkeyPatch,
+    choice: str,
+    expected: list[str],
+) -> None:
+    received: list[list[str]] = []
+    monkeypatch.setattr(draft_launcher, "main", lambda args: received.append(args) or 0)
+
+    assert draft_launcher.run(input_fn=lambda _: choice, output=io.StringIO()) == 0
+    assert received == [expected]
+
+
+def test_browser_review_has_gmail_compose_link_and_manual_cv_warning(tmp_path: Path) -> None:
+    message = EmailMessage()
+    message["To"] = "person@example.edu"
+    message["Subject"] = "Research discussion"
+    message.set_content("Hello Professor")
+    draft_path = tmp_path / "person.eml"
+    draft_path.write_bytes(message.as_bytes())
+
+    page_path = save_review_page(
+        [message],
+        [draft_path],
+        tmp_path / "review.html",
+        tmp_path / "cv.pdf",
+        browser_compose=True,
+    )
+    page = page_path.read_text(encoding="utf-8")
+
+    assert "Open in Gmail" in page
+    assert "attach <strong>cv.pdf</strong> manually" in page
+    assert "mail.google.com/mail/?" in page
+
+
+def test_refresh_removes_generated_drafts_but_preserves_other_files(tmp_path: Path) -> None:
+    drafts_dir = tmp_path / "drafts"
+    drafts_dir.mkdir()
+    (drafts_dir / "old.eml").write_text("old", encoding="utf-8")
+    (drafts_dir / "review.html").write_text("old", encoding="utf-8")
+    keep = drafts_dir / ".gitkeep"
+    keep.write_text("", encoding="utf-8")
+
+    assert clear_generated_drafts(drafts_dir) == 2
+    assert keep.is_file()
+    assert not (drafts_dir / "old.eml").exists()
+    assert not (drafts_dir / "review.html").exists()
+
+
+def test_refresh_rebuilds_drafted_but_never_sent_addresses(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, email_subject="Research enquiry")
+    settings.csv_path.write_text(
+        "Professor / Researcher,Email,University,Best-fit Domain\n"
+        "Dr Draft Person,draft@example.edu,Example University,Medical AI\n"
+        "Dr Sent Person,sent@example.edu,Example University,Computer Vision\n",
+        encoding="utf-8",
+    )
+    settings.template_path.write_text("Dear Professor {{ last_name }}, {{ domain }}", encoding="utf-8")
+    settings.cv_path.write_bytes(b"%PDF-1.4\n%%EOF")
+    append_log(
+        settings.log_path,
+        "Dr Draft Person",
+        "draft@example.edu",
+        "Example University",
+        "draft_only",
+        "drafted",
+    )
+    append_log(
+        settings.log_path,
+        "Dr Sent Person",
+        "sent@example.edu",
+        "Example University",
+        "send",
+        "sent",
+    )
+    settings.drafts_dir.mkdir(parents=True)
+    (settings.drafts_dir / "stale.eml").write_text("old", encoding="utf-8")
 
     result = run(
         settings,
@@ -303,20 +452,14 @@ def test_all_draft_mode_creates_every_draft_and_review_page(tmp_path: Path) -> N
             opt_out=None,
             all=True,
             open_drafts=False,
+            refresh_drafts=True,
         ),
     )
 
     assert result == 0
-    assert len(list(settings.drafts_dir.glob("*.eml"))) == 2
-    assert (settings.drafts_dir / "review.html").is_file()
-
-
-def test_beginner_launcher_uses_safe_all_drafts_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    received: list[list[str]] = []
-    monkeypatch.setattr(draft_launcher, "main", lambda args: received.append(args) or 0)
-
-    assert draft_launcher.run() == 0
-    assert received == [["--mode", "draft_only", "--all", "--open-drafts"]]
+    drafts = list(settings.drafts_dir.glob("*.eml"))
+    assert len(drafts) == 1
+    assert "draft_example.edu" in drafts[0].name
 
 
 def test_preview_renders_without_cv_or_generated_files(tmp_path: Path) -> None:
