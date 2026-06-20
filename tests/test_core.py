@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import make_drafts
+import draft_launcher
 from config import Settings, load_subject
 from email_builder import build_message, extract_last_name, render_body, save_draft
 from gmail_sender import SMTPSender
@@ -313,9 +313,9 @@ def test_all_draft_mode_creates_every_draft_and_review_page(tmp_path: Path) -> N
 
 def test_beginner_launcher_uses_safe_all_drafts_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     received: list[list[str]] = []
-    monkeypatch.setattr(make_drafts, "main", lambda args: received.append(args) or 0)
+    monkeypatch.setattr(draft_launcher, "main", lambda args: received.append(args) or 0)
 
-    assert make_drafts.run() == 0
+    assert draft_launcher.run() == 0
     assert received == [["--mode", "draft_only", "--all", "--open-drafts"]]
 
 

@@ -22,7 +22,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["config", "email_builder", "gmail_sender", "load_professors", "main", "review_page"]
+py-modules = ["config", "draft_launcher", "email_builder", "gmail_sender", "load_professors", "main", "review_page"]
 package-dir = { "" = "src" }
 
 [tool.pytest.ini_options]
