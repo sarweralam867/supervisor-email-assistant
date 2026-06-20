@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from config import Settings
+import draft_launcher
+from config import Settings, load_subject
 from email_builder import build_message, extract_last_name, render_body, save_draft
 from gmail_sender import SMTPSender
 from load_professors import Professor, email_skip_reason, load_professors
@@ -25,6 +26,7 @@ from main import (
     run,
     sent_today,
 )
+from review_page import gmail_compose_url, open_review_page, save_review_page
 
 
 def make_settings(tmp_path: Path, **overrides: object) -> Settings:
@@ -175,6 +177,23 @@ def test_daily_limit_is_hard_capped_and_counts_prior_sends(tmp_path: Path) -> No
     assert effective_limit(Namespace(limit=99, mode="send"), settings, rows) == 7
 
 
+def test_all_is_allowed_for_drafts_but_never_sending(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    assert effective_limit(Namespace(limit=None, mode="draft_only", all=True), settings, []) > 1_000_000
+    with pytest.raises(ValueError, match="cannot be used for real sending"):
+        effective_limit(Namespace(limit=None, mode="send", all=True), settings, [])
+
+
+def test_subject_file_is_private_single_line_configuration(tmp_path: Path) -> None:
+    subject_path = tmp_path / "subject.txt"
+    subject_path.write_text("A focused research enquiry\n", encoding="utf-8")
+    assert load_subject(subject_path) == "A focused research enquiry"
+
+    subject_path.write_text("First line\nSecond line", encoding="utf-8")
+    with pytest.raises(ValueError, match="single line"):
+        load_subject(subject_path)
+
+
 def test_build_and_save_eml_with_pdf_attachment(tmp_path: Path) -> None:
     professor = Professor(
         "Assoc. Prof. Example Researcher",
@@ -223,6 +242,81 @@ def test_smtp_sender_retries_transient_delivery(monkeypatch: pytest.MonkeyPatch,
     sender.send(message)
 
     assert attempts == 2
+
+
+def test_smtp_sender_does_not_retry_authentication_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path, smtp_retries=3, retry_backoff_seconds=0)
+    sleeps: list[float] = []
+    sender = SMTPSender(settings, sleep=sleeps.append)
+    attempts = 0
+
+    def reject_login() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+
+    monkeypatch.setattr(sender, "_connect", reject_login)
+    with pytest.raises(RuntimeError, match=r"rejected \(535\)"):
+        sender.__enter__()
+    assert attempts == 1
+    assert sleeps == []
+
+
+def test_review_page_escapes_content_and_opens_local_file(tmp_path: Path) -> None:
+    message = EmailMessage()
+    message["To"] = "person@example.edu"
+    message["Subject"] = "Research <discussion>"
+    message.set_content("Hello <script>alert('no')</script>")
+    review_path = save_review_page([message], tmp_path / "review.html", tmp_path / "cv.pdf")
+    page = review_path.read_text(encoding="utf-8")
+
+    assert "Hello &lt;script&gt;" in page
+    assert "<script>alert" not in page
+    assert "Open in Gmail" in page
+    assert "person%40example.edu" in gmail_compose_url(message)
+
+    opened: list[str] = []
+    assert open_review_page(review_path, lambda url: opened.append(url) or True)
+    assert opened == [review_path.resolve().as_uri()]
+
+
+def test_all_draft_mode_creates_every_draft_and_review_page(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, email_subject="Research enquiry")
+    settings.csv_path.write_text(
+        "Professor / Researcher,Email,University,Best-fit Domain\n"
+        "Dr First Person,first@example.edu,Example University,Medical AI\n"
+        "Dr Second Person,second@example.edu,Example University,Computer Vision\n",
+        encoding="utf-8",
+    )
+    settings.template_path.write_text("Dear Professor {{ last_name }}, {{ domain }}", encoding="utf-8")
+    settings.cv_path.write_bytes(b"%PDF-1.4\n%%EOF")
+
+    result = run(
+        settings,
+        Namespace(
+            mode="draft_only",
+            preview=False,
+            limit=None,
+            opt_out=None,
+            all=True,
+            open_drafts=False,
+        ),
+    )
+
+    assert result == 0
+    assert len(list(settings.drafts_dir.glob("*.eml"))) == 2
+    assert (settings.drafts_dir / "review.html").is_file()
+
+
+def test_beginner_launcher_uses_safe_all_drafts_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[list[str]] = []
+    monkeypatch.setattr(draft_launcher, "main", lambda args: received.append(args) or 0)
+
+    assert draft_launcher.run() == 0
+    assert received == [["--mode", "draft_only", "--all", "--open-drafts"]]
 
 
 def test_preview_renders_without_cv_or_generated_files(tmp_path: Path) -> None:

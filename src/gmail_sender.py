@@ -43,7 +43,11 @@ class SMTPSender:
             )
             if self.settings.smtp_use_starttls:
                 smtp.starttls(context=context)
-        smtp.login(self.settings.auth_username, self.settings.auth_password)
+        try:
+            smtp.login(self.settings.auth_username, self.settings.auth_password)
+        except (smtplib.SMTPException, OSError):
+            smtp.close()
+            raise
         self._smtp = smtp
 
     def _with_retry(self, operation: Callable[[], None], description: str) -> None:
@@ -53,19 +57,31 @@ class SMTPSender:
             try:
                 operation()
                 return
+            except smtplib.SMTPResponseException as exc:
+                if not 400 <= exc.smtp_code < 500:
+                    detail = exc.smtp_error.decode(errors="replace")
+                    raise RuntimeError(
+                        f"{description} was rejected ({exc.smtp_code}): {detail}"
+                    ) from exc
+                retry_error: BaseException = exc
             except RetryableSMTPError as exc:
-                if attempt == attempts:
-                    raise RuntimeError(f"{description} failed after {attempts} attempt(s): {exc}") from exc
-                delay = self.settings.retry_backoff_seconds * (2 ** (attempt - 1))
-                LOGGER.warning(
-                    "%s failed (attempt %d/%d); retrying in %.1fs: %s",
-                    description,
-                    attempt,
-                    attempts,
-                    delay,
-                    exc,
-                )
-                self._sleep(delay)
+                retry_error = exc
+            except smtplib.SMTPException as exc:
+                raise RuntimeError(f"{description} was rejected: {exc}") from exc
+            if attempt == attempts:
+                raise RuntimeError(
+                    f"{description} failed after {attempts} attempt(s): {retry_error}"
+                ) from retry_error
+            delay = self.settings.retry_backoff_seconds * (2 ** (attempt - 1))
+            LOGGER.warning(
+                "%s failed (attempt %d/%d); retrying in %.1fs: %s",
+                description,
+                attempt,
+                attempts,
+                delay,
+                retry_error,
+            )
+            self._sleep(delay)
 
     def __enter__(self) -> SMTPSender:
         """Connect to SMTP and return this sender."""

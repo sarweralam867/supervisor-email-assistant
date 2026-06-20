@@ -10,7 +10,8 @@ private_data/*
 
 # Generated output
 logs/*.csv
-logs/drafts/*.eml
+logs/drafts/*
+!logs/drafts/.gitkeep
 
 # Local development notes
 PROJECT_PLAN.md

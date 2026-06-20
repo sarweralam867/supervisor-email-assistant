@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SUBJECT = "Prospective Research Student in AI/ML and Medical Imaging"
 
 
 def _int_setting(name: str, default: int, *, minimum: int = 0) -> int:
@@ -51,6 +52,21 @@ def _project_path(raw_path: str) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
+def load_subject(subject_path: Path) -> str:
+    """Load a safe one-line subject from a private file or environment fallback."""
+    if subject_path.is_file():
+        subject = subject_path.read_text(encoding="utf-8-sig").strip()
+    else:
+        subject = os.getenv("EMAIL_SUBJECT", DEFAULT_SUBJECT).strip()
+    if not subject:
+        raise ValueError("Email subject cannot be empty.")
+    if "\r" in subject or "\n" in subject:
+        raise ValueError("Email subject must be a single line.")
+    if len(subject) > 200:
+        raise ValueError("Email subject must be 200 characters or fewer.")
+    return subject
+
+
 @dataclass(frozen=True)
 class Settings:
     """Validated, immutable configuration for one application run."""
@@ -77,7 +93,8 @@ class Settings:
     send_delay_max: int = 300
     opt_out_path: Path = PROJECT_ROOT / "private_data" / "opt_out.csv"
     log_level: str = "INFO"
-    email_subject: str = "Prospective Master by Research/MPhil Student - Medical AI"
+    email_subject: str = DEFAULT_SUBJECT
+    subject_path: Path = PROJECT_ROOT / "private_data" / "subject.txt"
 
     @property
     def sender_address(self) -> str:
@@ -115,6 +132,7 @@ def load_settings() -> Settings:
 
     email_address = os.getenv("EMAIL_ADDRESS", "").strip()
     app_password = os.getenv("EMAIL_APP_PASSWORD", "").replace(" ", "").strip()
+    subject_path = _project_path(os.getenv("SUBJECT_PATH", "private_data/subject.txt"))
     return Settings(
         email_address=email_address,
         email_app_password=app_password,
@@ -138,8 +156,6 @@ def load_settings() -> Settings:
         send_delay_max=delay_max,
         opt_out_path=_project_path(os.getenv("OPT_OUT_PATH", "private_data/opt_out.csv")),
         log_level=log_level,
-        email_subject=os.getenv(
-            "EMAIL_SUBJECT",
-            "Prospective Master by Research/MPhil Student - Medical AI",
-        ).strip(),
+        email_subject=load_subject(subject_path),
+        subject_path=subject_path,
     )

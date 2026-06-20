@@ -20,6 +20,7 @@ from config import Settings, load_settings
 from email_builder import build_message, render_body, save_draft
 from gmail_sender import SMTPSender
 from load_professors import Professor, email_skip_reason, load_professors, normalize_email
+from review_page import open_review_page, save_review_page
 
 LOGGER = logging.getLogger("supervisor_email_assistant")
 LOG_FIELDS = [
@@ -46,7 +47,21 @@ def parse_args(settings: Settings, argv: Sequence[str] | None = None) -> argpars
         action="store_true",
         help="Preview rendered messages without creating files.",
     )
-    parser.add_argument("--limit", type=int, help="Maximum emails for this run (hard-capped at 10).")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum emails for this run; real sending is always capped at 10 per day.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process every eligible record in preview or draft mode; never allowed for sending.",
+    )
+    parser.add_argument(
+        "--open-drafts",
+        action="store_true",
+        help="Open the private local review page after creating drafts.",
+    )
     parser.add_argument("--opt-out", metavar="EMAIL", help="Record an address that must never be contacted.")
     return parser.parse_args(argv)
 
@@ -166,14 +181,24 @@ def sent_today(rows: list[dict[str, str]]) -> int:
 
 def effective_limit(args: argparse.Namespace, settings: Settings, log_rows: list[dict[str, str]]) -> int:
     """Apply the requested limit, configured limit, and absolute daily cap."""
+    process_all = getattr(args, "all", False)
+    if process_all:
+        if args.mode == "send":
+            raise ValueError("--all cannot be used for real sending; the daily cap is 10.")
+        return sys.maxsize
     requested = settings.daily_limit if args.limit is None else args.limit
     if requested < 1:
         raise ValueError("--limit must be at least 1.")
-    limit = min(requested, settings.daily_limit, 10)
     if args.mode == "send":
         prior_sends = sent_today(log_rows)
-        limit = min(limit, max(0, settings.daily_limit - prior_sends), max(0, 10 - prior_sends))
-    return limit
+        return min(
+            requested,
+            settings.daily_limit,
+            10,
+            max(0, settings.daily_limit - prior_sends),
+            max(0, 10 - prior_sends),
+        )
+    return requested
 
 
 def raw_identity(raw: dict[str, str]) -> tuple[str, str, str]:
@@ -253,6 +278,9 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
     candidates = candidates[:limit]
     if not candidates:
         LOGGER.info("No eligible emails to process.")
+        existing_review = settings.drafts_dir / "review.html"
+        if args.mode == "draft_only" and getattr(args, "open_drafts", False) and existing_review.is_file():
+            open_review_page(existing_review)
         return 0
     if args.mode == "preview":
         preview_professors(candidates, settings.template_path, output)
@@ -263,6 +291,7 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
     context: AbstractContextManager[SMTPSender | None]
     context = SMTPSender(settings) if args.mode == "send" else nullcontext()
     completed = 0
+    draft_messages: list[EmailMessage] = []
     try:
         with context as smtp:
             for index, professor in enumerate(candidates):
@@ -276,6 +305,7 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
                     )
                     if args.mode == "draft_only":
                         path = save_draft(message, professor, settings.drafts_dir)
+                        draft_messages.append(message)
                         status = "drafted"
                         LOGGER.info("DRAFT %s: %s", professor.email, path)
                     else:
@@ -304,6 +334,16 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
     except (OSError, RuntimeError, smtplib.SMTPException) as exc:
         LOGGER.error("SMTP connection failed: %s", exc)
         return 1
+
+    if draft_messages:
+        review_path = save_review_page(
+            draft_messages,
+            settings.drafts_dir / "review.html",
+            settings.cv_path,
+        )
+        LOGGER.info("REVIEW PAGE: %s", review_path)
+        if getattr(args, "open_drafts", False) and not open_review_page(review_path):
+            LOGGER.warning("Could not open the browser automatically. Open this file: %s", review_path)
 
     LOGGER.info("Completed %d of %d eligible email(s) in %s mode.", completed, len(candidates), args.mode)
     return 0 if completed == len(candidates) else 1
