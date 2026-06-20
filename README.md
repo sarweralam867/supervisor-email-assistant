@@ -113,6 +113,16 @@ your.email@example.com
 Edit `.env` only if you need different paths or SMTP settings. Private inputs, generated drafts, and audit
 logs are ignored by Git.
 
+### Change the email subject
+
+Open `.env` and edit this line:
+
+```env
+EMAIL_SUBJECT=Prospective Master by Research/MPhil Student - Medical AI
+```
+
+This changes the subject for all new drafts and sent emails. Existing `.eml` drafts are not changed.
+
 ## Preview, draft, and send
 
 Preview rendering without reading the CV, creating files, changing duplicate state, or sending:

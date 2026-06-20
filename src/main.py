@@ -272,6 +272,7 @@ def run(settings: Settings, args: argparse.Namespace, *, output: TextIO = sys.st
                         sender_address,
                         settings.template_path,
                         settings.cv_path,
+                        settings.email_subject,
                     )
                     if args.mode == "draft_only":
                         path = save_draft(message, professor, settings.drafts_dir)

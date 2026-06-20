@@ -77,6 +77,7 @@ class Settings:
     send_delay_max: int = 300
     opt_out_path: Path = PROJECT_ROOT / "private_data" / "opt_out.csv"
     log_level: str = "INFO"
+    email_subject: str = "Prospective Master by Research/MPhil Student - Medical AI"
 
     @property
     def sender_address(self) -> str:
@@ -137,4 +138,8 @@ def load_settings() -> Settings:
         send_delay_max=delay_max,
         opt_out_path=_project_path(os.getenv("OPT_OUT_PATH", "private_data/opt_out.csv")),
         log_level=log_level,
+        email_subject=os.getenv(
+            "EMAIL_SUBJECT",
+            "Prospective Master by Research/MPhil Student - Medical AI",
+        ).strip(),
     )

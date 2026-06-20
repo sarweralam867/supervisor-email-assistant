@@ -8,7 +8,7 @@ from jinja2 import Environment, StrictUndefined
 
 from load_professors import Professor
 
-SUBJECT = "Prospective Master by Research Student in AI/ML and Medical Imaging"
+SUBJECT = "Prospective Master by Research/MPhil Student - Medical AI"
 TITLE_RE = re.compile(
     r"^(?:(?:assoc(?:iate)?\.?|asst\.?|assistant|emeritus)\s+)?"
     r"(?:prof(?:essor)?\.?|dr\.?|mr\.?|mrs\.?|ms\.?)\s+",
@@ -48,13 +48,14 @@ def build_message(
     sender: str,
     template_path: Path,
     cv_path: Path,
+    subject: str = SUBJECT,
 ) -> EmailMessage:
     """Build a plain-text MIME message with a PDF CV attachment."""
     if not cv_path.is_file():
         raise FileNotFoundError(f"CV not found: {cv_path}")
 
     message = EmailMessage()
-    message["Subject"] = SUBJECT
+    message["Subject"] = subject
     message["From"] = sender
     message["To"] = professor.email
     message.set_content(render_body(template_path, professor))
