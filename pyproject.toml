@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "supervisor-email-assistant"
-version = "1.1.0"
+version = "1.2.0"
 description = "Safe, review-first research supervisor outreach email tooling"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,7 +22,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["config", "email_builder", "gmail_sender", "load_professors", "main"]
+py-modules = ["config", "email_builder", "gmail_sender", "load_professors", "main", "review_page"]
 package-dir = { "" = "src" }
 
 [tool.pytest.ini_options]

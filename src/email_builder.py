@@ -6,9 +6,10 @@ from pathlib import Path
 
 from jinja2 import Environment, StrictUndefined
 
+from config import DEFAULT_SUBJECT
 from load_professors import Professor
 
-SUBJECT = "Prospective Master by Research/MPhil Student - Medical AI"
+SUBJECT = DEFAULT_SUBJECT
 TITLE_RE = re.compile(
     r"^(?:(?:assoc(?:iate)?\.?|asst\.?|assistant|emeritus)\s+)?"
     r"(?:prof(?:essor)?\.?|dr\.?|mr\.?|mrs\.?|ms\.?)\s+",
